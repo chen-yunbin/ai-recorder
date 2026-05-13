@@ -2,112 +2,110 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>AI 智能錄音助理</title>
+    <title>AI 智能錄影助理 (Pro 版)</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #e0e0e0; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
-        .container { background: #2d2d2d; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); text-align: center; width: 80%; max-width: 500px; }
-        h1 { color: #4CAF50; margin-bottom: 0.5rem; }
-        .visualizer-container { background: #000; height: 100px; width: 100%; border-radius: 10px; margin: 20px 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
-        .bar { width: 5px; height: 20px; background: #4CAF50; margin: 0 2px; border-radius: 5px; transition: height 0.1s; }
-        .controls { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
-        button { padding: 12px 24px; font-size: 1rem; cursor: pointer; border: none; border-radius: 50px; font-weight: bold; transition: 0.3s; }
-        #start { background: #4CAF50; color: white; }
-        #start:hover { background: #45a049; transform: scale(1.05); }
-        #stop { background: #f44336; color: white; }
-        #stop:disabled { background: #555; cursor: not-allowed; }
-        .transcript-area { background: #3d3d3d; border-radius: 10px; padding: 15px; text-align: left; min-height: 100px; border-left: 5px solid #4CAF50; }
-        .status { font-size: 0.9rem; color: #888; margin-bottom: 10px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #121212; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .container { background: #1e1e1e; padding: 2rem; border-radius: 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.6); text-align: center; width: 90%; max-width: 600px; border: 1px solid #333; }
+        h1 { color: #00e676; margin-bottom: 1.5rem; font-weight: 300; }
+        #preview { width: 100%; border-radius: 12px; background: #000; margin-bottom: 1rem; border: 2px solid #00e676; display: none; }
+        .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 1rem; }
+        button { padding: 14px; font-size: 15px; border: none; border-radius: 12px; cursor: pointer; transition: 0.3s; font-weight: bold; }
+        #startBtn { background: #00e676; color: #000; grid-column: span 2; }
+        #stopBtn { background: #ff5252; color: white; display: none; grid-column: span 2; }
+        #switchBtn { background: #333; color: white; }
+        #status { color: #00e676; font-family: monospace; font-size: 13px; margin-top: 10px; }
+        .log { font-size: 12px; color: #888; text-align: left; background: #121212; padding: 10px; border-radius: 8px; max-height: 100px; overflow-y: auto; margin-top: 10px; }
     </style>
 </head>
 <body>
-
-<div class="container">
-    <h1>🎤 AI 錄音助理</h1>
-    <div class="status" id="status">狀態：準備就緒</div>
-    
-    <div class="visualizer-container" id="visualizer">
+    <div class="container">
+        <h1>🎥 AI 智能助理 Pro</h1>
+        <video id="preview" autoplay muted playsinline></video>
+        <div class="controls">
+            <button id="startBtn">開始錄製 (每 30 秒自動存檔)</button>
+            <button id="stopBtn">停止並結束</button>
+            <button id="switchBtn">切換鏡頭 (支援外接)</button>
         </div>
-
-    <div class="controls">
-        <button id="start">開始錄音</button>
-        <button id="stop" disabled>停止並下載</button>
+        <div id="status">系統就緒</div>
+        <div class="log" id="log">等待操作...</div>
     </div>
 
-    <div style="text-align: left; margin-bottom: 5px;">📝 AI 逐字稿預覽：</div>
-    <div class="transcript-area" id="transcript">
-        等待錄音完成後，這裡將會顯示 AI 辨識結果...
-    </div>
-</div>
+    <script>
+        let mediaRecorder;
+        let currentStream;
+        let segmentCount = 1;
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
 
-<script>
-    let mediaRecorder;
-    let audioChunks = [];
-    let audioContext;
-    let analyser;
-    let dataArray;
-    let animationId;
-
-    const startBtn = document.getElementById('start');
-    const stopBtn = document.getElementById('stop');
-    const statusText = document.getElementById('status');
-    const visualizer = document.getElementById('visualizer');
-
-    // 產生音量波形條
-    for(let i=0; i<20; i++) {
-        const bar = document.createElement('div');
-        bar.className = 'bar';
-        visualizer.appendChild(bar);
-    }
-    const bars = document.querySelectorAll('.bar');
-
-    startBtn.onclick = async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        
-        // 視覺化設定
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const source = audioContext.createMediaStreamSource(stream);
-        analyser = audioContext.createAnalyser();
-        source.connect(analyser);
-        analyser.fftSize = 64;
-        dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-        function updateVisualizer() {
-            analyser.getByteFrequencyData(dataArray);
-            bars.forEach((bar, index) => {
-                const val = dataArray[index % dataArray.length];
-                bar.style.height = (val / 2) + 'px';
-            });
-            animationId = requestAnimationFrame(updateVisualizer);
+        function addLog(msg) {
+            const time = new Date().toLocaleTimeString();
+            log.innerHTML = `[${time}] ${msg}<br>` + log.innerHTML;
         }
-        updateVisualizer();
 
-        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-        mediaRecorder.onstop = () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/mp3' });
-            const url = URL.createObjectURL(audioBlob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `錄音_${new Date().toLocaleTimeString()}.mp3`;
-            a.click();
-            cancelAnimationFrame(animationId);
-            statusText.innerText = "狀態：錄音已存檔，等待 AI 處理...";
-            document.getElementById('transcript').innerText = "（示範模式）AI 偵測到您說了：『你好，這是一個漂亮的錄音助理介面！』";
+        async function startRecording(deviceId = null) {
+            try {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+
+                const constraints = {
+                    audio: true,
+                    video: deviceId ? { deviceId: { exact: deviceId } } : true
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                currentStream = stream;
+                document.getElementById('preview').srcObject = stream;
+                document.getElementById('preview').style.display = 'block';
+
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+                
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        const url = URL.createObjectURL(e.data);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `片段_${segmentCount++}_${new Date().getTime()}.webm`;
+                        a.click();
+                        addLog(`已自動儲存第 ${segmentCount-1} 個片段`);
+                    }
+                };
+
+                // 核心：邊錄邊傳 (每 30000 毫秒 = 30 秒自動切一塊)
+                mediaRecorder.start(30000); 
+                
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('stopBtn').style.display = 'inline-block';
+                status.innerText = "🔴 錄製並傳輸中...";
+                addLog("錄製啟動，自動分段功能已開啟");
+            } catch (err) {
+                addLog("錯誤: " + err.message);
+                alert("無法存取相機，請檢查外接鏡頭連接或權限設定！");
+            }
+        }
+
+        document.getElementById('startBtn').onclick = () => startRecording();
+
+        document.getElementById('stopBtn').onclick = () => {
+            mediaRecorder.stop();
+            currentStream.getTracks().forEach(track => track.stop());
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            status.innerText = "系統就緒";
+            addLog("錄製已結束");
         };
 
-        audioChunks = [];
-        mediaRecorder.start();
-        startBtn.disabled = true;
-        stopBtn.disabled = false;
-        statusText.innerText = "狀態：正在錄製音訊...";
-    };
-
-    stopBtn.onclick = () => {
-        mediaRecorder.stop();
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-    };
-</script>
-
+        document.getElementById('switchBtn').onclick = async () => {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            if (videoDevices.length > 1) {
+                const nextDevice = videoDevices.find(d => d.deviceId !== currentStream.getVideoTracks()[0].getSettings().deviceId);
+                startRecording(nextDevice.deviceId);
+                addLog("已切換至下一個鏡頭");
+            } else {
+                alert("未偵測到多個鏡頭（請確認外接鏡頭已連接）");
+            }
+        };
+    </script>
 </body>
 </html>
