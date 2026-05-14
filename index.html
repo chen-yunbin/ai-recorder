@@ -2,132 +2,109 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>AI 錄影助理 (完整錄製版)</title>
+    <title>AI 影音助理：錄製與切割工具</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #121212; color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .container { background: #1e1e1e; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); text-align: center; width: 95%; max-width: 600px; }
         h1 { color: #00e676; margin-bottom: 1rem; }
-        #preview { width: 100%; border-radius: 12px; background: #000; margin-bottom: 1rem; border: 2px solid #333; display: none; }
-        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        #preview { width: 100%; border-radius: 12px; background: #000; margin-bottom: 1rem; border: 2px solid #333; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
         button { padding: 15px; font-size: 16px; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        #startBtn { background: #00e676; color: #000; grid-column: span 2; }
-        #stopBtn { background: #ff5252; color: white; display: none; grid-column: span 2; }
-        #switchBtn { background: #444; color: white; }
-        #status { margin-top: 15px; font-size: 16px; color: #00e676; font-weight: bold; }
-        .timer { font-family: monospace; font-size: 24px; margin-bottom: 10px; display: none; }
+        .btn-start { background: #00e676; color: #000; grid-column: span 2; }
+        .btn-stop { background: #ff5252; color: white; display: none; grid-column: span 2; }
+        .btn-tool { background: #444; color: white; }
+        .status-box { margin-top: 20px; padding: 10px; background: #252525; border-radius: 8px; font-size: 14px; color: #00e676; }
+        input[type="file"] { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎥 AI 錄影助理 (完整版)</h1>
-        <div id="timer" class="timer">00:00:00</div>
+        <h1>🎥 AI 錄製 & 切割器</h1>
         <video id="preview" autoplay muted playsinline></video>
+        
         <div class="btn-group">
-            <button id="startBtn">開始錄製</button>
-            <button id="stopBtn">停止並儲存完整影片</button>
-            <button id="switchBtn">切換鏡頭</button>
+            <button id="startBtn" class="btn-start">開始錄影 (每5分鐘自動下載)</button>
+            <button id="stopBtn" class="btn-stop">停止錄影</button>
+            
+            <label class="btn-tool" style="display: flex; align-items: center; justify-content: center; cursor: pointer;">
+                📁 切割舊檔案
+                <input type="file" id="fileInput" accept="video/*">
+            </label>
+            <button id="switchBtn" class="btn-tool">切換鏡頭/麥克風</button>
         </div>
-        <div id="status">準備就緒</div>
+
+        <div class="status-box" id="status">狀態：準備就緒</div>
     </div>
 
     <script>
         let mediaRecorder;
         let recordedChunks = [];
-        let currentStream;
-        let videoDevices = [];
-        let currentDeviceIndex = 0;
-        let startTime;
-        let timerInterval;
-
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const switchBtn = document.getElementById('switchBtn');
-        const preview = document.getElementById('preview');
         const status = document.getElementById('status');
-        const timerDisplay = document.getElementById('timer');
 
-        function updateTimer() {
-            const now = new Date().getTime();
-            const diff = now - startTime;
-            const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
-            const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
-            const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
-            timerDisplay.innerText = `${h}:${m}:${s}`;
-        }
-
-        async function getDevices() {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            videoDevices = devices.filter(d => d.kind === 'videoinput');
-        }
-
-        async function startRecording(deviceId) {
-            if (currentStream) {
-                currentStream.getTracks().forEach(track => track.stop());
-            }
-
+        // --- 功能 A：自動分段錄影 ---
+        document.getElementById('startBtn').onclick = async () => {
             try {
-                const constraints = {
-                    video: { deviceId: deviceId ? { exact: deviceId } : undefined, width: 1280, height: 720 },
-                    audio: true
-                };
-
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                currentStream = stream;
-                preview.srcObject = stream;
-                preview.style.display = 'block';
-
-                recordedChunks = [];
-                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 1280, height: 720 }, 
+                    audio: { echoCancellation: true, noiseSuppression: true } 
+                });
+                document.getElementById('preview').srcObject = stream;
+                
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
                 mediaRecorder.ondataavailable = (e) => {
-                    if (e.data.size > 0) recordedChunks.push(e.data);
+                    if (e.data.size > 0) {
+                        const url = URL.createObjectURL(e.data);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `AI片段_${new Date().getTime()}.webm`;
+                        a.click();
+                        status.innerText = "狀態：已自動存檔一個 5 分鐘片段";
+                    }
                 };
+                
+                // 設定每 5 分鐘 (300000ms) 自動切斷並觸發一次下載
+                mediaRecorder.start(300000); 
+                
+                document.getElementById('startBtn').style.display = 'none';
+                document.getElementById('stopBtn').style.display = 'block';
+                status.innerText = "狀態：正在錄製，每 5 分鐘會自動跳出下載...";
+            } catch (err) {
+                alert("無法啟動設備：" + err.message);
+            }
+        };
 
-                mediaRecorder.onstop = () => {
-                    const blob = new Blob(recordedChunks, { type: 'video/webm' });
+        document.getElementById('stopBtn').onclick = () => {
+            mediaRecorder.stop();
+            location.reload(); 
+        };
+
+        // --- 功能 B：本地檔案切割 ---
+        document.getElementById('fileInput').onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            status.innerText = "狀態：正在讀取大檔案...";
+
+            const video = document.createElement('video');
+            video.src = URL.createObjectURL(file);
+            video.onloadedmetadata = async () => {
+                const segmentSize = (file.size / video.duration) * 300; // 估算 5 分鐘的 Byte 大小
+                let start = 0;
+                let count = 1;
+
+                while (start < file.size) {
+                    const blob = file.slice(start, start + segmentSize);
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `課程錄影_${new Date().getTime()}.webm`;
+                    a.download = `切割片段_${count}_${file.name}`;
                     a.click();
-                };
-
-                mediaRecorder.start();
-                
-                // 計時器邏輯
-                startTime = new Date().getTime();
-                timerDisplay.style.display = 'block';
-                timerInterval = setInterval(updateTimer, 1000);
-
-                startBtn.style.display = 'none';
-                stopBtn.style.display = 'block';
-                status.innerText = "🔴 錄製中...";
-            } catch (err) {
-                alert("無法存取相機：" + err.message);
-            }
-        }
-
-        startBtn.onclick = async () => {
-            await getDevices();
-            startRecording(videoDevices[0]?.deviceId);
-        };
-
-        stopBtn.onclick = () => {
-            mediaRecorder.stop();
-            clearInterval(timerInterval);
-            currentStream.getTracks().forEach(track => track.stop());
-            preview.style.display = 'none';
-            timerDisplay.style.display = 'none';
-            startBtn.style.display = 'block';
-            stopBtn.style.display = 'none';
-            status.innerText = "影片已下載";
-        };
-
-        switchBtn.onclick = async () => {
-            await getDevices();
-            if (videoDevices.length < 2) return alert("未偵測到多個鏡頭");
-            currentDeviceIndex = (currentDeviceIndex + 1) % videoDevices.length;
-            startRecording(videoDevices[currentDeviceIndex].deviceId);
+                    start += segmentSize;
+                    count++;
+                    status.innerText = `狀態：已產出第 ${count-1} 個小檔案...`;
+                    await new Promise(r => setTimeout(r, 1000));
+                }
+                status.innerText = "狀態：切割完成！請將檔案傳給 AI";
+            };
         };
     </script>
 </body>
